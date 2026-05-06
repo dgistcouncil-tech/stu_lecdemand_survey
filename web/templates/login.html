@@ -13,10 +13,10 @@
             <p>다음 학기 수강 계획을 입력해주세요</p>
         </div>
 
-        <form id="loginForm" class="login-form">
+        <form id="loginForm" class="login-form" action="/login" method="POST">
             <div class="form-group">
                 <label for="studentId">학번 *</label>
-                <input type="text" id="studentId" name="studentId" required
+                <input type="text" id="studentId" name="student_id" required
                        placeholder="예: 2021123456">
             </div>
 
@@ -71,7 +71,7 @@
 
                 <div class="form-group">
                     <label for="currentYear">재학 학년</label>
-                    <select id="currentYear" name="currentYear">
+                    <select id="currentYear" name="current_year">
                         <option value="">선택하세요</option>
                         <option value="1-1">1-1</option>
                         <option value="1-2">1-2</option>
@@ -88,7 +88,7 @@
 
                 <div class="form-group">
                     <label for="specialNotes">특이사항</label>
-                    <textarea id="specialNotes" name="specialNotes" rows="3"
+                    <textarea id="specialNotes" name="special_notes" rows="3"
                               placeholder="예: 초과학점 신청, 졸업학기"></textarea>
                 </div>
             </div>

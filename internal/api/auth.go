@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -19,30 +20,27 @@ func NewAuthHandler(database *db.Database) *AuthHandler {
 	return &AuthHandler{DB: database}
 }
 
-// Login handles both login and registration
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+type loginResult struct {
+	Student   *models.Student
+	IsNewUser bool
+	Token     string
+}
 
-	var req models.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+type loginFailure struct {
+	Code   string
+	Status int
+}
 
+func (h *AuthHandler) performLogin(req *models.LoginRequest) (*loginResult, *loginFailure) {
 	// Validate required fields
 	if req.StudentID == "" || req.Name == "" || req.Password == "" {
-		http.Error(w, "Student ID, name, and password are required", http.StatusBadRequest)
-		return
+		return nil, &loginFailure{Code: "missing_fields", Status: http.StatusBadRequest}
 	}
 
 	// Check if student exists
 	existingStudent, err := h.DB.GetStudentByStudentID(req.StudentID)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		return nil, &loginFailure{Code: "server_error", Status: http.StatusInternalServerError}
 	}
 
 	var student *models.Student
@@ -52,8 +50,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		// New user - create account
 		hashedPassword, err := util.HashPassword(req.Password)
 		if err != nil {
-			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
-			return
+			return nil, &loginFailure{Code: "server_error", Status: http.StatusInternalServerError}
 		}
 
 		student = &models.Student{
@@ -68,66 +65,114 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.DB.CreateStudent(student); err != nil {
-			http.Error(w, "Failed to create student account", http.StatusInternalServerError)
-			return
+			return nil, &loginFailure{Code: "server_error", Status: http.StatusInternalServerError}
 		}
 
 		isNewUser = true
 	} else {
 		// Existing user - verify password
 		if !util.CheckPasswordHash(req.Password, existingStudent.Password) {
-			http.Error(w, "Invalid password", http.StatusUnauthorized)
-			return
+			return nil, &loginFailure{Code: "invalid_password", Status: http.StatusUnauthorized}
 		}
 
 		student = existingStudent
-		isNewUser = false
 	}
 
 	// Create session
 	token, err := middleware.Store.CreateSession(student.ID)
 	if err != nil {
 		log.Printf("[LOGIN] Failed to create session: %v", err)
-		http.Error(w, "Failed to create session", http.StatusInternalServerError)
-		return
+		return nil, &loginFailure{Code: "server_error", Status: http.StatusInternalServerError}
 	}
 
-	log.Printf("[LOGIN] Session created for student ID %d, token: %s... (first 10 chars)", student.ID, token[:min(10, len(token))])
-	log.Printf("[LOGIN] Total sessions in store: %d", len(middleware.Store.GetAllSessions()))
+	return &loginResult{Student: student, IsNewUser: isNewUser, Token: token}, nil
+}
 
-	// Set headers FIRST before writing anything
-	w.Header().Set("Content-Type", "application/json")
-
-	// Set cookie - MUST be before WriteHeader or any Write
-	// TEMPORARY: HttpOnly set to false for debugging cookie issues
+func setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_token",
 		Value:    token,
 		Path:     "/",
-		HttpOnly: false, // Temporarily false to allow JavaScript cookie setting for debugging
-		MaxAge:   7200,  // 2 hours
-		SameSite: http.SameSiteLaxMode, // Lax mode for localhost HTTP (None requires HTTPS)
-		Secure:   false,                // false for localhost HTTP development
+		HttpOnly: true,
+		MaxAge:   7200, // 2 hours
+		SameSite: http.SameSiteLaxMode,
+		Secure:   false,
 	})
+}
 
-	log.Printf("[LOGIN] Cookie set in response header")
+// Login handles JSON login (used by API clients)
+func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-	// Send response
+	var req models.LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	res, fail := h.performLogin(&req)
+	if fail != nil {
+		switch fail.Code {
+		case "missing_fields":
+			http.Error(w, "Student ID, name, and password are required", fail.Status)
+		case "invalid_password":
+			http.Error(w, "Invalid password", fail.Status)
+		default:
+			http.Error(w, "Internal server error", fail.Status)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	setSessionCookie(w, res.Token)
+
 	response := models.LoginResponse{
 		Success:   true,
-		IsNewUser: isNewUser,
-		Student:   student,
-		Token:     token,
+		IsNewUser: res.IsNewUser,
+		Student:   res.Student,
+		Token:     res.Token,
 	}
 
 	json.NewEncoder(w).Encode(response)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// LoginForm handles browser form POST and redirects
+func (h *AuthHandler) LoginForm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	return b
+
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/login.html?error=server_error", http.StatusSeeOther)
+		return
+	}
+
+	req := models.LoginRequest{
+		StudentID:    r.FormValue("student_id"),
+		Name:         r.FormValue("name"),
+		Password:     r.FormValue("password"),
+		Major:        r.FormValue("major"),
+		Minor:        r.FormValue("minor"),
+		CurrentYear:  r.FormValue("current_year"),
+		SpecialNotes: r.FormValue("special_notes"),
+	}
+
+	res, fail := h.performLogin(&req)
+	if fail != nil {
+		http.Redirect(w, r, "/login.html?error="+url.QueryEscape(fail.Code), http.StatusSeeOther)
+		return
+	}
+
+	setSessionCookie(w, res.Token)
+	if res.Student.IsSubmitted {
+		http.Redirect(w, r, "/result.html", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/index.html", http.StatusSeeOther)
 }
 
 // GetMe returns current logged-in student info
@@ -143,25 +188,14 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get student from DB by ID
-	query := `SELECT id, student_id, name, major, minor, current_year,
-			  special_notes, is_submitted, created_at, updated_at
-			  FROM students WHERE id = ?`
-
-	var s models.Student
-	err := h.DB.DB.QueryRow(query, studentID).Scan(
-		&s.ID, &s.StudentID, &s.Name, &s.Major, &s.Minor,
-		&s.CurrentYear, &s.SpecialNotes, &s.IsSubmitted,
-		&s.CreatedAt, &s.UpdatedAt,
-	)
-
-	if err != nil {
+	student, err := h.DB.GetStudentByID(studentID)
+	if err != nil || student == nil {
 		http.Error(w, "Student not found", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s)
+	json.NewEncoder(w).Encode(student)
 }
 
 // Logout handles user logout

@@ -1,6 +1,9 @@
 package db
 
-import "log"
+import (
+	"database/sql"
+	"log"
+)
 
 // Migrate creates all necessary tables
 func (d *Database) Migrate() error {
@@ -62,6 +65,49 @@ func (d *Database) Migrate() error {
 		}
 	}
 
+	if err := d.ensureCoursesIsActiveColumn(); err != nil {
+		return err
+	}
+
 	log.Println("Database migrations completed")
+	return nil
+}
+
+func (d *Database) ensureCoursesIsActiveColumn() error {
+	rows, err := d.DB.Query("PRAGMA table_info(courses)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	exists := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var ctype string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "is_active" {
+			exists = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if exists {
+		return nil
+	}
+
+	if _, err := d.DB.Exec("ALTER TABLE courses ADD COLUMN is_active BOOLEAN DEFAULT TRUE"); err != nil {
+		return err
+	}
+	_, _ = d.DB.Exec("UPDATE courses SET is_active = TRUE WHERE is_active IS NULL")
+	_, _ = d.DB.Exec("CREATE INDEX IF NOT EXISTS idx_courses_is_active ON courses(is_active)")
 	return nil
 }

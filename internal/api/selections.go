@@ -72,8 +72,8 @@ func (h *SelectionHandler) CreateSelection(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Validate priority (1-7)
-	if req.Priority < 1 || req.Priority > 7 {
-		http.Error(w, "Priority must be between 1 and 7", http.StatusBadRequest)
+	if req.Priority < 1 || req.Priority > 10 {
+		http.Error(w, "Priority must be between 1 and 10", http.StatusBadRequest)
 		return
 	}
 

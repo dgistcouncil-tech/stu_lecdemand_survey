@@ -13,8 +13,30 @@ type CourseHandler struct {
 	DB *db.Database
 }
 
+type CourseFilterOptionsResponse struct {
+	Divisions []string `json:"divisions"`
+	Fields    []string `json:"fields"`
+}
+
 func NewCourseHandler(database *db.Database) *CourseHandler {
 	return &CourseHandler{DB: database}
+}
+
+// GetCourseFilterOptions returns distinct values for division/field filters.
+func (h *CourseHandler) GetCourseFilterOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	divisions, fields, err := h.DB.GetCourseFilterOptions()
+	if err != nil {
+		http.Error(w, "Failed to get filter options", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(CourseFilterOptionsResponse{Divisions: divisions, Fields: fields})
 }
 
 // GetCourses returns a list of courses with optional filtering
@@ -31,12 +53,15 @@ func (h *CourseHandler) GetCourses(w http.ResponseWriter, r *http.Request) {
 		Field:    query.Get("field"),
 		Area:     query.Get("area"),
 		Search:   query.Get("search"),
-		Limit:    100, // Default limit
+		Limit:    10, // Default limit
 		Offset:   0,
 	}
 
 	if limitStr := query.Get("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
+			if limit > 100 {
+				limit = 100
+			}
 			filter.Limit = limit
 		}
 	}
@@ -52,11 +77,6 @@ func (h *CourseHandler) GetCourses(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to get courses", http.StatusInternalServerError)
 		return
-	}
-
-	// Add NO field (row number)
-	for i := range courses {
-		courses[i].ID = filter.Offset + i + 1 // Use ID field for NO
 	}
 
 	response := models.CourseListResponse{

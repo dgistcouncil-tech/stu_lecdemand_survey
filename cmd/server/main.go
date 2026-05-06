@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -26,8 +27,8 @@ func main() {
 	}
 	defer database.Close()
 
-	// Load courses from CSV if the table is empty
-	if err := loadCoursesIfEmpty(database); err != nil {
+	// Load courses from CSV (upsert) so CSV updates are reflected on restart.
+	if err := loadCoursesFromCSV(database); err != nil {
 		log.Printf("Warning: Failed to load courses from CSV: %v", err)
 	}
 
@@ -55,8 +56,12 @@ func main() {
 	// Serve HTML pages
 	mux.HandleFunc("/", serveFile(filepath.Join(templatesDir, "login.html")))
 	mux.HandleFunc("/login.html", serveFile(filepath.Join(templatesDir, "login.html")))
-	mux.HandleFunc("/index.html", serveFile(filepath.Join(templatesDir, "index.html")))
+	// NOTE: http.ServeFile redirects "/index.html" -> "/"; use ServeContent to avoid that.
+	mux.HandleFunc("/index.html", serveHTML(filepath.Join(templatesDir, "index.html")))
 	mux.HandleFunc("/result.html", serveFile(filepath.Join(templatesDir, "result.html")))
+
+	// Browser form login (sets cookie + redirects)
+	mux.HandleFunc("/login", authHandler.LoginForm)
 
 	// API routes - Authentication
 	mux.HandleFunc("/api/login", middleware.CORSMiddleware(authHandler.Login))
@@ -64,6 +69,7 @@ func main() {
 	mux.HandleFunc("/api/me", middleware.CORSMiddleware(middleware.AuthMiddleware(authHandler.GetMe)))
 
 	// API routes - Courses
+	mux.HandleFunc("/api/course-filters", middleware.CORSMiddleware(middleware.AuthMiddleware(courseHandler.GetCourseFilterOptions)))
 	mux.HandleFunc("/api/courses", middleware.CORSMiddleware(middleware.AuthMiddleware(courseHandler.GetCourses)))
 	mux.HandleFunc("/api/courses/", middleware.CORSMiddleware(middleware.AuthMiddleware(courseHandler.GetCourse)))
 	mux.HandleFunc("/api/recommendations", middleware.CORSMiddleware(middleware.AuthMiddleware(courseHandler.GetRecommendedAlternatives)))
@@ -83,23 +89,15 @@ func main() {
 	}
 }
 
-func loadCoursesIfEmpty(database *db.Database) error {
-	// Check if courses table is empty
-	var count int
-	err := database.DB.QueryRow("SELECT COUNT(*) FROM courses").Scan(&count)
-	if err != nil {
-		return err
-	}
+func loadCoursesFromCSV(database *db.Database) error {
+	var before int
+	_ = database.DB.QueryRow("SELECT COUNT(*) FROM courses").Scan(&before)
 
-	if count > 0 {
-		log.Printf("Courses already loaded (%d courses)", count)
-		return nil
-	}
-
-	log.Println("Loading courses from CSV...")
+	log.Println("Loading courses from CSV (upsert)...")
 
 	// Try to read CSV file from multiple possible locations
 	var file *os.File
+	var err error
 
 	csvPaths := []string{
 		"reference/개설강좌.csv",
@@ -124,25 +122,58 @@ func loadCoursesIfEmpty(database *db.Database) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse CSV: %w", err)
 	}
+	if len(courses) == 0 {
+		return fmt.Errorf("parsed 0 courses from CSV (unexpected)")
+	}
 
-	// Insert courses into database
+	// Sync behavior: mark all as inactive, then upsert active ones from CSV.
+	if _, err := database.DB.Exec("UPDATE courses SET is_active = FALSE"); err != nil {
+		return fmt.Errorf("failed to mark courses inactive: %w", err)
+	}
+
+	processed := 0
+	failed := 0
 	for i, course := range courses {
 		if err := database.CreateCourse(&course); err != nil {
-			log.Printf("Warning: Failed to insert course %s: %v", course.CourseCode, err)
+			failed++
+			log.Printf("Warning: Failed to upsert course %s (%s): %v", course.CourseCode, course.Professor, err)
 			continue
 		}
-		if (i+1)%100 == 0 {
-			log.Printf("Loaded %d courses...", i+1)
+		processed++
+		if (i+1)%200 == 0 {
+			log.Printf("Processed %d courses...", i+1)
 		}
 	}
 
-	log.Printf("Successfully loaded %d courses from CSV", len(courses))
+	var after int
+	_ = database.DB.QueryRow("SELECT COUNT(*) FROM courses").Scan(&after)
+	log.Printf("Courses before: %d, after: %d (processed %d/%d, failed %d)", before, after, processed, len(courses), failed)
 	return nil
 }
 
 func serveFile(path string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, path)
+	}
+}
+
+func serveHTML(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		f, err := os.Open(path)
+		if err != nil {
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+		defer f.Close()
+
+		st, err := f.Stat()
+		if err != nil {
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeContent(w, r, st.Name(), st.ModTime(), f)
 	}
 }
 
@@ -162,7 +193,7 @@ func handleSelectionsCRUD(h *api.SelectionHandler) http.HandlerFunc {
 func handleSelectionsWithID(h *api.SelectionHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if it's alternatives endpoint
-		if len(r.URL.Path) > 0 && r.URL.Path[len(r.URL.Path)-12:] == "/alternatives" {
+		if strings.HasSuffix(r.URL.Path, "/alternatives") {
 			if r.Method == http.MethodPost {
 				h.CreateAlternative(w, r)
 			} else {

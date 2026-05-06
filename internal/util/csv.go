@@ -9,17 +9,75 @@ import (
 	"strings"
 )
 
-// ParseCoursesCSV parses the courses CSV file and returns a slice of Course models
+func normalizeHeader(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "\ufeff")
+	return s
+}
+
+func getField(record []string, idx int) string {
+	if idx < 0 || idx >= len(record) {
+		return ""
+	}
+	return strings.TrimSpace(record[idx])
+}
+
+// ParseCoursesCSV parses 개설강좌.csv.
+// NOTE: The file begins with a title row and empty row; the real header row starts with "NO".
 func ParseCoursesCSV(reader io.Reader) ([]models.Course, error) {
 	csvReader := csv.NewReader(reader)
+	csvReader.FieldsPerRecord = -1
+	csvReader.LazyQuotes = true
 
-	// Skip header row
-	if _, err := csvReader.Read(); err != nil {
-		return nil, fmt.Errorf("failed to read header: %w", err)
+	// Find header row
+	var header []string
+	for {
+		rec, err := csvReader.Read()
+		if err == io.EOF {
+			return nil, fmt.Errorf("failed to find header row")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error reading CSV header: %w", err)
+		}
+		if len(rec) == 0 {
+			continue
+		}
+		first := normalizeHeader(rec[0])
+		if first == "NO" {
+			header = rec
+			break
+		}
 	}
 
+	idx := map[string]int{}
+	for i, h := range header {
+		idx[normalizeHeader(h)] = i
+	}
+
+	indexOf := func(keys ...string) int {
+		for _, k := range keys {
+			if i, ok := idx[k]; ok {
+				return i
+			}
+		}
+		return -1
+	}
+
+	idxCourseCode := indexOf("과목번호")
+	idxCourseName := indexOf("교과목명")
+	idxProfessor := indexOf("담당교수")
+	if idxCourseCode < 0 || idxCourseName < 0 || idxProfessor < 0 {
+		return nil, fmt.Errorf("missing required columns (과목번호/교과목명/담당교수)")
+	}
+
+	idxDivision := indexOf("이수구분")
+	idxField := indexOf("교과분야", "과목구분")
+	idxArea := indexOf("교과영역", "과목세부구분")
+	idxCredits := indexOf("학점")
+	idxSchedule := indexOf("요일/교시/강의실")
+
 	var courses []models.Course
-	lineNum := 1
+	lineNum := 0
 
 	for {
 		record, err := csvReader.Read()
@@ -27,42 +85,32 @@ func ParseCoursesCSV(reader io.Reader) ([]models.Course, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("error reading CSV at line %d: %w", lineNum, err)
+			return nil, fmt.Errorf("error reading CSV at data line %d: %w", lineNum, err)
 		}
-
 		lineNum++
 
 		// Skip empty rows
-		if len(record) == 0 || (len(record) > 0 && strings.TrimSpace(record[0]) == "") {
+		if len(record) == 0 || strings.TrimSpace(record[0]) == "" {
 			continue
 		}
 
-		// Expected columns based on 개설강좌.csv structure
-		// We need to handle the actual CSV structure
-		if len(record) < 10 {
-			continue // Skip incomplete rows
-		}
-
-		// Parse credits
 		credits := 0.0
-		if record[8] != "" {
-			credits, err = strconv.ParseFloat(strings.TrimSpace(record[8]), 64)
-			if err != nil {
-				// Skip if credits can't be parsed
-				continue
+		creditsRaw := getField(record, idxCredits)
+		if creditsRaw != "" {
+			if v, err := strconv.ParseFloat(creditsRaw, 64); err == nil {
+				credits = v
 			}
 		}
 
 		course := models.Course{
-			CourseCode:   strings.TrimSpace(record[1]),  // 과목번호
-			CourseName:   strings.TrimSpace(record[2]),  // 교과목명
-			Professor:    strings.TrimSpace(record[4]),  // 담당교수
-			Division:     strings.TrimSpace(record[5]),  // 이수구분
-			Field:        strings.TrimSpace(record[6]),  // 교과분야
-			Area:         strings.TrimSpace(record[7]),  // 교과영역
-			Credits:      credits,                       // 학점
-			SyllabusLink: strings.TrimSpace(record[3]),  // 강의계획서
-			Schedule:     strings.TrimSpace(record[9]),  // 시간표 (마지막 컬럼)
+			CourseCode: getField(record, idxCourseCode),
+			CourseName: getField(record, idxCourseName),
+			Professor:  getField(record, idxProfessor),
+			Division:   getField(record, idxDivision),
+			Field:      getField(record, idxField),
+			Area:       getField(record, idxArea),
+			Credits:    credits,
+			Schedule:   getField(record, idxSchedule),
 		}
 
 		// Skip courses with empty essential fields

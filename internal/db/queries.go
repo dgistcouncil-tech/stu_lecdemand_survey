@@ -31,6 +31,29 @@ func (d *Database) GetStudentByStudentID(studentID string) (*models.Student, err
 	return &student, nil
 }
 
+func (d *Database) GetStudentByID(id int) (*models.Student, error) {
+	var student models.Student
+	query := `SELECT id, student_id, name, major, minor, current_year,
+			  special_notes, is_submitted, created_at, updated_at
+			  FROM students WHERE id = ?`
+
+	err := d.DB.QueryRow(query, id).Scan(
+		&student.ID, &student.StudentID, &student.Name,
+		&student.Major, &student.Minor, &student.CurrentYear,
+		&student.SpecialNotes, &student.IsSubmitted,
+		&student.CreatedAt, &student.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &student, nil
+}
+
 func (d *Database) CreateStudent(student *models.Student) error {
 	query := `INSERT INTO students (student_id, name, password, major, minor,
 			  current_year, special_notes) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -59,6 +82,48 @@ func (d *Database) UpdateStudentSubmitStatus(studentID int, isSubmitted bool) er
 
 // Course queries
 
+func (d *Database) GetCourseFilterOptions() (divisions []string, fields []string, err error) {
+	divRows, err := d.DB.Query(`SELECT DISTINCT division FROM courses WHERE is_active = TRUE AND division IS NOT NULL AND division != '' ORDER BY division`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer divRows.Close()
+
+	for divRows.Next() {
+		var v sql.NullString
+		if err := divRows.Scan(&v); err != nil {
+			return nil, nil, err
+		}
+		if v.Valid && v.String != "" {
+			divisions = append(divisions, v.String)
+		}
+	}
+	if err := divRows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	fieldRows, err := d.DB.Query(`SELECT DISTINCT field FROM courses WHERE is_active = TRUE AND field IS NOT NULL AND field != '' ORDER BY field`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer fieldRows.Close()
+
+	for fieldRows.Next() {
+		var v sql.NullString
+		if err := fieldRows.Scan(&v); err != nil {
+			return nil, nil, err
+		}
+		if v.Valid && v.String != "" {
+			fields = append(fields, v.String)
+		}
+	}
+	if err := fieldRows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	return divisions, fields, nil
+}
+
 func (d *Database) GetCourses(filter models.CourseFilter) ([]models.Course, int, error) {
 	var courses []models.Course
 	var conditions []string
@@ -66,6 +131,9 @@ func (d *Database) GetCourses(filter models.CourseFilter) ([]models.Course, int,
 
 	baseQuery := `SELECT id, course_code, course_name, professor, division, field,
 				  area, credits, syllabus_link, schedule FROM courses`
+
+	// Only show active courses in search/listing.
+	conditions = append(conditions, "is_active = TRUE")
 
 	if filter.Division != "" {
 		conditions = append(conditions, "division = ?")
@@ -143,24 +211,27 @@ func (d *Database) GetCourseByID(id int) (*models.Course, error) {
 }
 
 func (d *Database) CreateCourse(course *models.Course) error {
+	// Upsert by (course_code, professor) so updated CSV content is reflected
+	// without requiring the courses table to be empty.
 	query := `INSERT INTO courses (course_code, course_name, professor, division,
-			  field, area, credits, syllabus_link, schedule)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			  field, area, credits, syllabus_link, schedule, is_active)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+			  ON CONFLICT(course_code, professor) DO UPDATE SET
+			  course_name = excluded.course_name,
+			  division = excluded.division,
+			  field = excluded.field,
+			  area = excluded.area,
+			  credits = excluded.credits,
+			  syllabus_link = excluded.syllabus_link,
+			  schedule = excluded.schedule,
+			  is_active = TRUE`
 
-	result, err := d.DB.Exec(query, course.CourseCode, course.CourseName,
-		course.Professor, course.Division, course.Field, course.Area,
-		course.Credits, course.SyllabusLink, course.Schedule)
-	if err != nil {
-		return err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return err
-	}
-
-	course.ID = int(id)
-	return nil
+	_, err := d.DB.Exec(query,
+		course.CourseCode, course.CourseName, course.Professor,
+		course.Division, course.Field, course.Area,
+		course.Credits, course.SyllabusLink, course.Schedule,
+	)
+	return err
 }
 
 // Selection queries
@@ -362,7 +433,7 @@ func (d *Database) GetRecommendedAlternatives(courseID int, limit int) ([]models
 	query := `SELECT id, course_code, course_name, professor, division, field,
 			  area, credits, syllabus_link, schedule
 			  FROM courses
-			  WHERE id != ? AND (division = ? OR field = ?)
+			  WHERE is_active = TRUE AND id != ? AND (division = ? OR field = ?)
 			  ORDER BY
 			    CASE WHEN division = ? AND field = ? THEN 1
 			         WHEN division = ? THEN 2
