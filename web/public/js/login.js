@@ -13,6 +13,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     const majorSelect = document.getElementById('major');
     const minorSelect = document.getElementById('minor');
 
+    // Check for error query parameter on load (inline message only, no alert on refresh)
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorCode = urlParams.get('error');
+    const isNewUser = urlParams.get('new_user');
+
+    if (errorCode) {
+        if (errorCode === 'already_exists') {
+            alert('이미 가입된 학번입니다.');
+        }
+
+        let errorMsg = '로그인 중 오류가 발생했습니다.';
+        if (errorCode === 'already_exists') {
+            errorMsg = '이미 가입된 학번입니다.';
+        } else if (errorCode === 'invalid_name' || errorCode === 'invalid_password') {
+            errorMsg = '이름 혹은 비밀번호를 잘못 입력하셨습니다.';
+        } else if (errorCode === 'missing_fields') {
+            errorMsg = '학번, 성함, 비밀번호를 모두 입력해주세요.';
+        }
+        showError('errorMessage', errorMsg);
+    } else if (isNewUser === 'true') {
+        additionalFields.style.display = 'block';
+        showError('errorMessage', '신규 사용자입니다. 추가 정보를 입력하고 다시 제출해주세요.');
+    }
+
+    // Clear query parameters from URL without refreshing
+    if (window.location.search) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     const TRACKS = Array.from(majorSelect.options)
         .filter(o => o.value)
         .map(o => o.value);
@@ -43,6 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             student_id: document.getElementById('studentId').value.trim(),
             name: document.getElementById('name').value.trim(),
             password: document.getElementById('password').value,
+            is_registration: additionalFields.style.display !== 'none',
         };
 
         if (!formData.student_id || !formData.name || !formData.password) {
@@ -79,8 +109,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (error) {
             const msg = error.message || '';
-            if (msg.includes('Invalid password')) {
-                showError('errorMessage', '비밀번호가 일치하지 않습니다.');
+            if (msg.includes('Already registered student ID')) {
+                alert('이미 가입된 학번입니다.');
+                form.reset();
+                additionalFields.style.display = 'none';
+            } else if (msg.includes('Invalid name') || msg.includes('Invalid password')) {
+                alert('이름 혹은 비밀번호를 잘못 입력하셨습니다.');
+                form.reset();
+                additionalFields.style.display = 'none';
             } else {
                 showError('errorMessage', '로그인 중 오류가 발생했습니다: ' + msg);
             }

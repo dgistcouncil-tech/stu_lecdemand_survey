@@ -47,7 +47,12 @@ func (h *AuthHandler) performLogin(req *models.LoginRequest) (*loginResult, *log
 	var isNewUser bool
 
 	if existingStudent == nil {
-		// New user - create account
+		// New user - check if they provided additional info
+		if !req.IsRegistration {
+			return &loginResult{IsNewUser: true}, nil
+		}
+
+		// Create account
 		hashedPassword, err := util.HashPassword(req.Password)
 		if err != nil {
 			return nil, &loginFailure{Code: "server_error", Status: http.StatusInternalServerError}
@@ -70,7 +75,17 @@ func (h *AuthHandler) performLogin(req *models.LoginRequest) (*loginResult, *log
 
 		isNewUser = true
 	} else {
-		// Existing user - verify password
+		// Existing user - if registration is attempted, it's a conflict
+		if req.IsRegistration {
+			return nil, &loginFailure{Code: "already_exists", Status: http.StatusConflict}
+		}
+
+		// Verify name first
+		if existingStudent.Name != req.Name {
+			return nil, &loginFailure{Code: "invalid_name", Status: http.StatusUnauthorized}
+		}
+
+		// Verify password
 		if !util.CheckPasswordHash(req.Password, existingStudent.Password) {
 			return nil, &loginFailure{Code: "invalid_password", Status: http.StatusUnauthorized}
 		}
@@ -130,6 +145,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		switch fail.Code {
 		case "missing_fields":
 			http.Error(w, "Student ID, name, and password are required", fail.Status)
+		case "already_exists":
+			http.Error(w, "Already registered student ID", fail.Status)
+		case "invalid_name":
+			http.Error(w, "Invalid name", fail.Status)
 		case "invalid_password":
 			http.Error(w, "Invalid password", fail.Status)
 		default:
@@ -164,13 +183,14 @@ func (h *AuthHandler) LoginForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := models.LoginRequest{
-		StudentID:    r.FormValue("student_id"),
-		Name:         r.FormValue("name"),
-		Password:     r.FormValue("password"),
-		Major:        r.FormValue("major"),
-		Minor:        r.FormValue("minor"),
-		CurrentYear:  r.FormValue("current_year"),
-		SpecialNotes: r.FormValue("special_notes"),
+		StudentID:      r.FormValue("student_id"),
+		Name:           r.FormValue("name"),
+		Password:       r.FormValue("password"),
+		Major:          r.FormValue("major"),
+		Minor:          r.FormValue("minor"),
+		CurrentYear:    r.FormValue("current_year"),
+		SpecialNotes:   r.FormValue("special_notes"),
+		IsRegistration: r.FormValue("major") != "" || r.FormValue("current_year") != "",
 	}
 
 	res, fail := h.performLogin(&req)
@@ -179,8 +199,14 @@ func (h *AuthHandler) LoginForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if res.IsNewUser && res.Student == nil {
+		// Redirect back with a flag to show additional fields
+		http.Redirect(w, r, "/login.html?new_user=true", http.StatusSeeOther)
+		return
+	}
+
 	setSessionCookie(w, res.Token)
-	if res.Student.IsSubmitted {
+	if res.Student != nil && res.Student.IsSubmitted {
 		http.Redirect(w, r, "/result.html", http.StatusSeeOther)
 		return
 	}

@@ -17,13 +17,14 @@ type Student struct {
 }
 
 type LoginRequest struct {
-	StudentID    string `json:"student_id"`
-	Name         string `json:"name"`
-	Password     string `json:"password"`
-	Major        string `json:"major,omitempty"`
-	Minor        string `json:"minor,omitempty"`
-	CurrentYear  string `json:"current_year,omitempty"`
-	SpecialNotes string `json:"special_notes,omitempty"`
+	StudentID      string `json:"student_id"`
+	Name           string `json:"name"`
+	Password       string `json:"password"`
+	Major          string `json:"major,omitempty"`
+	Minor          string `json:"minor,omitempty"`
+	CurrentYear    string `json:"current_year,omitempty"`
+	SpecialNotes   string `json:"special_notes,omitempty"`
+	IsRegistration bool   `json:"is_registration,omitempty"`
 }
 
 type LoginResponse struct {
