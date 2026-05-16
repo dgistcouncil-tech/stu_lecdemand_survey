@@ -44,6 +44,8 @@ body {
 .student-info-trigger {
     position: relative;
     cursor: default;
+    padding: 6px 8px;
+    margin: -6px -8px;
 }
 
 .student-info-tooltip {
@@ -62,6 +64,16 @@ body {
     font-size: 13px;
     line-height: 1.9;
     white-space: nowrap;
+}
+
+/* Transparent bridge that fills the 8px gap so hover isn't lost mid-move */
+.student-info-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    height: 8px;
 }
 
 .student-info-trigger:hover .student-info-tooltip {

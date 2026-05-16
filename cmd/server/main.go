@@ -68,7 +68,16 @@ func main() {
 	// API routes - Authentication
 	mux.HandleFunc("/api/login", middleware.CORSMiddleware(authHandler.Login))
 	mux.HandleFunc("/api/logout", middleware.CORSMiddleware(authHandler.Logout))
-	mux.HandleFunc("/api/me", middleware.CORSMiddleware(middleware.AuthMiddleware(authHandler.GetMe)))
+	mux.HandleFunc("/api/me", middleware.CORSMiddleware(middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			authHandler.GetMe(w, r)
+		case http.MethodPut:
+			authHandler.UpdateMe(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})))
 
 	// API routes - Courses
 	mux.HandleFunc("/api/course-filters", middleware.CORSMiddleware(middleware.AuthMiddleware(courseHandler.GetCourseFilterOptions)))

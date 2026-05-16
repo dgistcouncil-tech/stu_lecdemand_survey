@@ -300,6 +300,73 @@
         </div>
     </div>
 
+    <!-- Student Info Edit Modal -->
+    <div id="studentInfoEditModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>추가 정보 수정</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="editMajor">목표 전공</label>
+                    <select id="editMajor">
+                        <option value="">선택하세요</option>
+                        <option value="물리학트랙">물리학트랙</option>
+                        <option value="화학트랙">화학트랙</option>
+                        <option value="생명과학트랙">생명과학트랙</option>
+                        <option value="뇌과학트랙">뇌과학트랙</option>
+                        <option value="기계공학트랙">기계공학트랙</option>
+                        <option value="재료공학트랙">재료공학트랙</option>
+                        <option value="전자공학트랙">전자공학트랙</option>
+                        <option value="컴퓨터공학트랙">컴퓨터공학트랙</option>
+                        <option value="화학공학트랙">화학공학트랙</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editMinor">부전공/복수전공</label>
+                    <select id="editMinor">
+                        <option value="">선택하세요</option>
+                        <option value="물리학트랙">물리학트랙</option>
+                        <option value="화학트랙">화학트랙</option>
+                        <option value="생명과학트랙">생명과학트랙</option>
+                        <option value="뇌과학트랙">뇌과학트랙</option>
+                        <option value="기계공학트랙">기계공학트랙</option>
+                        <option value="재료공학트랙">재료공학트랙</option>
+                        <option value="전자공학트랙">전자공학트랙</option>
+                        <option value="컴퓨터공학트랙">컴퓨터공학트랙</option>
+                        <option value="화학공학트랙">화학공학트랙</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editCurrentYear">재학 학년</label>
+                    <select id="editCurrentYear">
+                        <option value="">선택하세요</option>
+                        <option value="1-1">1-1</option>
+                        <option value="1-2">1-2</option>
+                        <option value="2-1">2-1</option>
+                        <option value="2-2">2-2</option>
+                        <option value="3-1">3-1</option>
+                        <option value="3-2">3-2</option>
+                        <option value="4-1">4-1</option>
+                        <option value="4-2">4-2</option>
+                        <option value="5-1">5-1</option>
+                        <option value="5-2">5-2</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editSpecialNotes">특이사항</label>
+                    <textarea id="editSpecialNotes" rows="3" placeholder="예: 초과학점 신청, 졸업학기"></textarea>
+                </div>
+                <div id="editInfoError" class="error-message" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="studentInfoSaveBtn" class="btn btn-primary">저장</button>
+                <button id="studentInfoCancelBtn" class="btn btn-secondary">취소</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Priority Conflict Modal -->
     <div id="priorityConflictModal" class="modal">
         <div class="modal-content">

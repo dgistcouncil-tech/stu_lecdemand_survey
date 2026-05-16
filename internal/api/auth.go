@@ -210,6 +210,45 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(student)
 }
 
+// UpdateMe updates additional info (major, minor, current_year, special_notes)
+func (h *AuthHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	studentID, ok := middleware.GetStudentIDFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Major        string `json:"major"`
+		Minor        string `json:"minor"`
+		CurrentYear  string `json:"current_year"`
+		SpecialNotes string `json:"special_notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.DB.UpdateStudentAdditionalInfo(studentID, req.Major, req.Minor, req.CurrentYear, req.SpecialNotes); err != nil {
+		http.Error(w, "Failed to update", http.StatusInternalServerError)
+		return
+	}
+
+	student, err := h.DB.GetStudentByID(studentID)
+	if err != nil || student == nil {
+		http.Error(w, "Student not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(student)
+}
+
 // Logout handles user logout
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

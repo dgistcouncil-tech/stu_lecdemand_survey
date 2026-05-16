@@ -30,21 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('studentId').textContent = currentStudent.student_id;
     document.getElementById('studentMajor').textContent = currentStudent.major || '-';
 
-    // Populate hover tooltip with additional info
-    const tooltipEl = document.getElementById('studentInfoTooltip');
-    if (tooltipEl) {
-        const rows = [
-            ['목표 전공', currentStudent.major],
-            ['부전공/복수전공', currentStudent.minor],
-            ['재학 학년', currentStudent.current_year],
-            ['특이사항', currentStudent.special_notes],
-        ];
-        const html = rows
-            .filter(([, v]) => v)
-            .map(([k, v]) => `<div><strong>${k}:</strong> ${v}</div>`)
-            .join('');
-        tooltipEl.innerHTML = html || '<div style="color:#999">추가 정보 없음</div>';
-    }
+    renderStudentTooltip();
 
     await loadCourseFiltersInto('filterDivision', 'filterField');
 
@@ -1317,6 +1303,103 @@ async function submitSurvey() {
     }
 }
 
+function renderStudentTooltip() {
+    const tooltipEl = document.getElementById('studentInfoTooltip');
+    if (!tooltipEl) return;
+
+    const rows = [
+        ['목표 전공', currentStudent.major],
+        ['부전공/복수전공', currentStudent.minor],
+        ['재학 학년', currentStudent.current_year],
+        ['특이사항', currentStudent.special_notes],
+    ];
+    const infoHtml = rows
+        .filter(row => row[1])
+        .map(row => `<div><strong>${row[0]}:</strong> ${row[1]}</div>`)
+        .join('') || '<div style="color:#999">추가 정보 없음</div>';
+
+    tooltipEl.innerHTML = infoHtml +
+        '<div style="margin-top:8px;border-top:1px solid #eee;padding-top:6px">' +
+        '<button type="button" id="openStudentInfoEditBtn" class="btn btn-primary btn-sm" style="width:100%">추가 정보 수정</button>' +
+        '</div>';
+
+    document.getElementById('openStudentInfoEditBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openStudentInfoEditModal();
+    });
+}
+
+function openStudentInfoEditModal() {
+    const TRACKS = ['물리학트랙', '화학트랙', '생명과학트랙', '뇌과학트랙',
+        '기계공학트랙', '재료공학트랙', '전자공학트랙', '컴퓨터공학트랙', '화학공학트랙'];
+
+    const majorSel = document.getElementById('editMajor');
+    const minorSel = document.getElementById('editMinor');
+
+    majorSel.value = currentStudent.major || '';
+    minorSel.value = currentStudent.minor || '';
+    document.getElementById('editCurrentYear').value = currentStudent.current_year || '';
+    document.getElementById('editSpecialNotes').value = currentStudent.special_notes || '';
+
+    // Rebuild minor to exclude selected major
+    function rebuildEditMinor() {
+        const selectedMajor = majorSel.value;
+        const currentMinor = minorSel.value;
+        minorSel.innerHTML = '<option value="">선택하세요</option>';
+        TRACKS.forEach(track => {
+            if (track === selectedMajor) return;
+            const opt = document.createElement('option');
+            opt.value = track;
+            opt.textContent = track;
+            if (track === currentMinor) opt.selected = true;
+            minorSel.appendChild(opt);
+        });
+    }
+
+    rebuildEditMinor();
+    majorSel.removeEventListener('change', majorSel._editHandler);
+    majorSel._editHandler = rebuildEditMinor;
+    majorSel.addEventListener('change', majorSel._editHandler);
+
+    document.getElementById('editInfoError').style.display = 'none';
+    openModal('studentInfoEditModal');
+}
+
+async function saveStudentInfo() {
+    const major = document.getElementById('editMajor').value;
+    const minor = document.getElementById('editMinor').value;
+    const currentYear = document.getElementById('editCurrentYear').value;
+    const specialNotes = document.getElementById('editSpecialNotes').value.trim();
+    const errEl = document.getElementById('editInfoError');
+
+    errEl.style.display = 'none';
+
+    try {
+        const updated = await apiRequest('/api/me', {
+            method: 'PUT',
+            body: JSON.stringify({
+                major, minor,
+                current_year: currentYear,
+                special_notes: specialNotes,
+            }),
+        });
+
+        currentStudent.major = updated.major;
+        currentStudent.minor = updated.minor;
+        currentStudent.current_year = updated.current_year;
+        currentStudent.special_notes = updated.special_notes;
+
+        // Refresh header and tooltip
+        document.getElementById('studentMajor').textContent = updated.major || '-';
+        renderStudentTooltip();
+
+        closeModal('studentInfoEditModal');
+    } catch (error) {
+        errEl.textContent = '저장 중 오류가 발생했습니다: ' + error.message;
+        errEl.style.display = 'block';
+    }
+}
+
 function setupModalListeners() {
     // Selection modal
     document.getElementById('modalConfirm').addEventListener('click', confirmSelection);
@@ -1331,6 +1414,10 @@ function setupModalListeners() {
         selectedAltCourse = null;
         selectedParentCourseForAlt = null;
     });
+
+    // Student info edit modal
+    document.getElementById('studentInfoSaveBtn').addEventListener('click', saveStudentInfo);
+    document.getElementById('studentInfoCancelBtn').addEventListener('click', () => closeModal('studentInfoEditModal'));
 
     // Priority conflict modal
     document.getElementById('conflictReplaceBtn').addEventListener('click', handleConflictReplace);
